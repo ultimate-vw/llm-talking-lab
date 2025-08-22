@@ -1,0 +1,9 @@
+<!doctype html><title>Agent</title>
+<input id=q style="width:60%" placeholder="2+2, http://example.com, or general question"><button id=go>Run SSE</button>
+<pre id=out></pre>
+<script>
+const out=document.getElementById('out');
+go.onclick=()=>{ out.textContent=""; const es=new EventSource('/run-stream?message='+encodeURIComponent(q.value)); 
+['plan','action','observation','final'].forEach(n=>es.addEventListener(n,e=>out.textContent+=n.toUpperCase()+": "+e.data+"\n"));
+es.addEventListener('done',()=>es.close()); };
+</script>
