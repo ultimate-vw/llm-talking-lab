@@ -1,0 +1,8 @@
+<!doctype html><title>Docs</title>
+<input type=file id=f> <button id=up>Submit</button> <input id=job placeholder="job id"><button id=w>Watch</button>
+<pre id=out></pre>
+<script>
+const out=document.getElementById('out');
+up.onclick=async()=>{const fd=new FormData(); fd.append('file', f.files[0]); const r=await fetch('/submit',{method:'POST',body:fd}); const j=await r.json(); out.textContent=JSON.stringify(j,null,2); };
+w.onclick=()=>{ const es=new EventSource('/jobs/'+job.value+'/events'); es.addEventListener('status',e=>out.textContent+=e.data+"\n"); es.addEventListener('done',()=>es.close()); };
+</script>
