@@ -1,0 +1,79 @@
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - --api.insecure=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false   # only route labeled containers
+      - --providers.docker.network=llm-talking-lab_llmlabs  # <— your compose network name
+      - --entrypoints.web.address=:80
+    ports: ["80:80", "8080:8080"]
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    networks: [llmlabs]
+
+
+  orchestrator:
+    build: { context: ., dockerfile: orchestrator-service/Dockerfile }
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=llm-talking-lab_llmlabs
+      - traefik.http.routers.orch.rule=PathPrefix(`/`)
+      - traefik.http.routers.orch.entrypoints=web
+      - traefik.http.routers.orch.priority=1
+      - traefik.http.services.orch.loadbalancer.server.port=8081
+    ports:
+      - "8081:8081"
+    networks: [llmlabs]
+
+  rag:
+    build: { context: ., dockerfile: rag-service/Dockerfile }
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=llm-talking-lab_llmlabs
+      - traefik.http.routers.rag.rule=PathPrefix(`/rag`)
+      - traefik.http.routers.rag.entrypoints=web
+      - traefik.http.routers.rag.priority=100
+      - traefik.http.middlewares.rag-sp.stripprefix.prefixes=/rag
+      - traefik.http.routers.rag.middlewares=rag-sp@docker
+      - traefik.http.services.rag.loadbalancer.server.port=8082
+    networks: [llmlabs]
+
+  agent:
+    build: { context: ., dockerfile: agent-service/Dockerfile }
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.agent.rule=PathPrefix(`/agent`)
+      - traefik.http.routers.agent.entrypoints=web
+      - traefik.http.middlewares.agent-sp.stripprefix.prefixes=/agent
+      - traefik.http.routers.agent.middlewares=agent-sp@docker
+      - traefik.http.services.agent.loadbalancer.server.port=8083
+    networks: [llmlabs]
+
+  docs:
+    build: { context: ., dockerfile: docs-service/Dockerfile }
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=llm-talking-lab_llmlabs
+      - traefik.http.routers.docs.rule=PathPrefix(`/docs`)
+      - traefik.http.routers.docs.entrypoints=web
+      - traefik.http.routers.docs.priority=100
+      - traefik.http.middlewares.docs-sp.stripprefix.prefixes=/docs
+      - traefik.http.routers.docs.middlewares=docs-sp@docker
+      - traefik.http.services.docs.loadbalancer.server.port=8084
+    networks: [llmlabs]
+
+  voice:
+    build: { context: ., dockerfile: voice-service/Dockerfile }
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=llm-talking-lab_llmlabs
+      - traefik.http.routers.voice.rule=PathPrefix(`/voice`)
+      - traefik.http.routers.voice.entrypoints=web
+      - traefik.http.routers.voice.priority=100
+      - traefik.http.middlewares.voice-sp.stripprefix.prefixes=/voice
+      - traefik.http.routers.voice.middlewares=voice-sp@docker
+      - traefik.http.services.voice.loadbalancer.server.port=8085
+    networks: [llmlabs]
+
+networks:
+  llmlabs: { driver: bridge }
