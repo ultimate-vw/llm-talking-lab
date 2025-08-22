@@ -1,0 +1,8 @@
+<!doctype html><title>Voice</title>
+<button id=s>Start</button> <button id=x>Stop</button>
+<div><b>Response:</b> <span id=r></span></div>
+<script>
+let sock; const r=document.getElementById('r');
+s.onclick=()=>{ sock=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws'); sock.onmessage=e=>{ r.textContent+=e.data; }; if(navigator.mediaDevices){ /* browser ASR omitted */ } sock.send("what is the time"); };
+x.onclick=()=>{ try{sock&&sock.close()}catch{} };
+</script>

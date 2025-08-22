@@ -1,0 +1,7 @@
+server:
+  port: 8085
+spring:
+  application:
+    name: voice
+management:
+  endpoints.web.exposure.include: health,info,metrics,prometheus
