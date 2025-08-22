@@ -1,0 +1,9 @@
+<!doctype html><title>RAG</title>
+<button id=ing>Ingest</button> <input id=q placeholder="ask..." style="width:60%"><button id=ask>Search</button><button id=askS>SSE</button>
+<pre id=out></pre>
+<script>
+const out=document.getElementById('out');
+ing.onclick=async()=>{out.textContent="ingesting..."; const r=await fetch('/ingest',{method:'POST'}); out.textContent=JSON.stringify(await r.json(),null,2);}
+ask.onclick=async()=>{out.textContent="searching..."; const r=await fetch('/query?q='+encodeURIComponent(q.value)); out.textContent=JSON.stringify(await r.json(),null,2)}
+askS.onclick=()=>{out.textContent=""; const es=new EventSource('/query-stream?q='+encodeURIComponent(q.value)); es.addEventListener('hit',e=>out.textContent+=e.data+"\n"); es.addEventListener('done',()=>es.close());}
+</script>
