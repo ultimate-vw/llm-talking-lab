@@ -1,0 +1,16 @@
+server:
+  port: 8081
+  shutdown: graceful
+spring:
+  application:
+    name: orchestrator
+management:
+  endpoints.web.exposure.include: health,info,metrics,prometheus
+  endpoint.health.probes.enabled: true
+logging:
+  level:
+    root: INFO
+    org.springframework: INFO
+security:
+  apiKeyHeader: X-API-Key
+  apiKey: ""   # set to enforce API key

@@ -1,0 +1,44 @@
+<!doctype html><meta charset="utf-8"><title>Modes Gallery</title>
+<style>body{font-family:sans-serif;margin:24px;max-width:900px}pre{background:#111;color:#eee;padding:12px;border-radius:8px;white-space:pre-wrap}</style>
+<h1>Modes Gallery</h1>
+<input id=prompt style="width:100%;padding:8px" placeholder="Type a prompt..."><br><br>
+<button id=rest>REST</button>
+<button id=sse>SSE</button>
+<button id=ws>WebSocket</button>
+<button id=batch>Batch + SSE</button>
+<button id=long>Long-poll</button>
+<pre id=out></pre>
+<script>
+const out = document.getElementById('out');
+const val = () => document.getElementById('prompt').value || "hello modes";
+rest.onclick = async () => {
+  out.textContent = "REST...\n";
+  const r = await fetch('/api/v1/rest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:val()})});
+  out.textContent += JSON.stringify(await r.json(), null, 2);
+};
+sse.onclick = () => {
+  out.textContent = "SSE...\n";
+  const es = new EventSource('/api/v1/sse?prompt='+encodeURIComponent(val()));
+  es.addEventListener('token', e => out.textContent += e.data);
+  es.addEventListener('done',  () => { out.textContent += "\n[DONE]"; es.close(); });
+};
+ws.onclick = () => {
+  out.textContent = "WS...\n";
+  const s = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/api/v1/ws');
+  s.onopen = () => s.send(JSON.stringify({type:'user_prompt', prompt: val()}));
+  s.onmessage = e => out.textContent += e.data + "\n";
+};
+batch.onclick = async () => {
+  out.textContent = "Batch...\n";
+  const r = await fetch('/api/v1/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:val()})});
+  const j = await r.json(); out.textContent += "jobId="+j.jobId+"\n";
+  const es = new EventSource('/api/v1/jobs/'+j.jobId+'/events');
+  es.addEventListener('status', e => out.textContent += "status: "+e.data+"\n");
+  es.addEventListener('done',   () => { out.textContent += "[DONE]\n"; es.close(); });
+};
+long.onclick = async () => {
+  out.textContent = "Long-poll...\n";
+  const r = await fetch('/api/v1/longpoll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:val()})});
+  out.textContent += JSON.stringify(await r.json(), null, 2);
+};
+</script>
