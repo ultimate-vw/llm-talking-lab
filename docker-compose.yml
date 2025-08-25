@@ -75,5 +75,19 @@ services:
       - traefik.http.services.voice.loadbalancer.server.port=8085
     networks: [llmlabs]
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    volumes:
+      - ollama:/root/.ollama
+    networks: [llmlabs]
+
 networks:
   llmlabs: { driver: bridge }
+volumes:
+  ollama:

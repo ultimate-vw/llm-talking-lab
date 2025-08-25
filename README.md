@@ -52,3 +52,59 @@ TTFB (first byte/token), time-to-useful, total.
 A log rail (event timeline): sent, first_token, tool_call, webhook_received, etc.
 
 What this proves: the communication contract is separable from the model; you can choose per use-case.
+
+
+## Run locally with Ollama (local LLM)
+
+1) Install Ollama on your machine (see `https://ollama.com`), or use the included docker-compose service.
+
+2) Bring up the stack with Ollama:
+
+```bash
+docker compose up -d --build
+```
+
+This will also start an `ollama` container on port 11434 with a persistent volume.
+
+3) Pull a model (first time only). From your host:
+
+```bash
+docker exec -it ollama ollama pull llama3.1
+```
+
+4) Configure model and endpoint (optional). Defaults are set in `orchestrator-service/src/main/resources/application.yml`:
+
+```yaml
+ollama:
+  url: http://ollama:11434
+  model: llama3.1
+```
+
+You can override via env vars when starting the orchestrator:
+
+```bash
+docker compose up -d orchestrator \
+  -e OLLAMA_URL=http://ollama:11434 \
+  -e OLLAMA_MODEL=llama3.1
+```
+
+5) Try the APIs:
+
+- REST sync:
+
+```bash
+curl -s http://localhost:8081/api/v1/rest -H 'Content-Type: application/json' \
+  -d '{"prompt":"Write a haiku about oceans"}'
+```
+
+- SSE streaming:
+
+Open `http://localhost:8081` in the browser and use the SSE demo, or:
+
+```bash
+curl -N "http://localhost:8081/api/v1/sse?prompt=Count%20to%20five"
+```
+
+Notes:
+- If you run Ollama outside docker (native app), set `ollama.url` to `http://host.docker.internal:11434` so services in Docker can reach it.
+- First generation with a new model downloads weights and may be slow.
