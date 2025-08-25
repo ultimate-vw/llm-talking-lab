@@ -1,8 +1,444 @@
-<!doctype html><title>Voice</title>
-<button id=s>Start</button> <button id=x>Stop</button>
-<div><b>Response:</b> <span id=r></span></div>
-<script>
-let sock; const r=document.getElementById('r');
-s.onclick=()=>{ sock=new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws'); sock.onmessage=e=>{ r.textContent+=e.data; }; if(navigator.mediaDevices){ /* browser ASR omitted */ } sock.send("what is the time"); };
-x.onclick=()=>{ try{sock&&sock.close()}catch{} };
-</script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Service - WebSocket Communication</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .message-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .send-btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            background: #667eea;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .send-btn:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .examples {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .example-btn {
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 16px;
+            border: 1px solid #667eea;
+            border-radius: 20px;
+            background: white;
+            color: #667eea;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .example-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .conversation {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            position: relative;
+        }
+
+        .message.user {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            margin-left: 20%;
+        }
+
+        .message.voice {
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+            margin-right: 20%;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .message-type {
+            color: #666;
+        }
+
+        .message-time {
+            color: #999;
+            font-size: 12px;
+        }
+
+        .message-content {
+            line-height: 1.5;
+            color: #333;
+            font-size: 18px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .connection-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-connected { background: #28a745; }
+        .status-disconnected { background: #dc3545; }
+        .status-connecting { background: #ffc107; }
+
+        .clear-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            background: #6c757d;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .clear-btn:hover {
+            background: #5a6268;
+        }
+
+        .typing-indicator {
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+            margin-right: 20%;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+            justify-content: center;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #9c27b0;
+            animation: typing 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes typing {
+            0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Voice Service</h1>
+            <p>WebSocket-based Voice Communication Demo</p>
+        </div>
+
+        <div class="controls">
+            <div class="input-group">
+                <input 
+                    type="text" 
+                    class="message-input" 
+                    id="messageInput" 
+                    placeholder="Type your message here... (try asking 'What time is it?')"
+                    value="What time is it?"
+                >
+                <button class="send-btn" id="sendBtn">🎤 Send</button>
+            </div>
+            
+            <div class="examples">
+                <div class="example-btn" data-example="What time is it?">🕐 Time</div>
+                <div class="example-btn" data-example="Hello there!">👋 Greeting</div>
+                <div class="example-btn" data-example="How are you today?">😊 Question</div>
+                <div class="example-btn" data-example="Tell me a joke">😄 Joke</div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <button class="clear-btn" id="clearBtn">🗑️ Clear</button>
+            
+            <div id="status" class="status">
+                <span class="connection-status status-disconnected" id="connectionStatus"></span>
+                Connecting to voice service...
+            </div>
+            
+            <div id="conversation" class="conversation"></div>
+            
+            <div id="typingIndicator" class="typing-indicator">
+                <div class="typing-dots">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class VoiceService {
+            constructor() {
+                this.conversation = [];
+                this.websocket = null;
+                this.isConnected = false;
+                this.initializeEventListeners();
+                this.connect();
+            }
+
+            initializeEventListeners() {
+                document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+                document.getElementById('messageInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendMessage();
+                    }
+                });
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearConversation());
+
+                // Example buttons
+                document.querySelectorAll('.example-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        document.getElementById('messageInput').value = e.target.dataset.example;
+                        this.sendMessage();
+                    });
+                });
+            }
+
+            connect() {
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = location.hostname === 'localhost' ? 'localhost:8085' : location.host;
+                
+                this.websocket = new WebSocket(`${protocol}//${host}/ws`);
+                
+                this.websocket.onopen = () => {
+                    this.isConnected = true;
+                    this.updateConnectionStatus('connected');
+                    this.updateStatus('Connected to voice service. Ready to communicate!');
+                };
+
+                this.websocket.onmessage = (e) => {
+                    this.hideTypingIndicator();
+                    this.addMessage('voice', e.data, 'Voice Response');
+                };
+
+                this.websocket.onclose = () => {
+                    this.isConnected = false;
+                    this.updateConnectionStatus('disconnected');
+                    this.updateStatus('Connection lost. Reconnecting...');
+                    setTimeout(() => this.connect(), 3000);
+                };
+
+                this.websocket.onerror = (error) => {
+                    this.isConnected = false;
+                    this.updateConnectionStatus('disconnected');
+                    this.updateStatus('Connection error. Please check the service.');
+                };
+            }
+
+            sendMessage() {
+                const message = document.getElementById('messageInput').value.trim();
+                if (!message || !this.isConnected) return;
+
+                // Add user message
+                this.addMessage('user', message, 'User Input');
+                
+                // Clear input and show typing indicator
+                document.getElementById('messageInput').value = '';
+                this.showTypingIndicator();
+
+                // Send via WebSocket
+                this.websocket.send(message);
+            }
+
+            addMessage(type, content, messageType) {
+                const message = {
+                    type,
+                    content,
+                    messageType,
+                    timestamp: new Date().toLocaleTimeString()
+                };
+
+                this.conversation.push(message);
+                this.displayMessage(message);
+            }
+
+            displayMessage(message) {
+                const conversationEl = document.getElementById('conversation');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${message.type}`;
+                messageDiv.innerHTML = `
+                    <div class="message-header">
+                        <span class="message-type">${message.messageType}</span>
+                        <span class="message-time">${message.timestamp}</span>
+                    </div>
+                    <div class="message-content">${message.content}</div>
+                `;
+                conversationEl.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            showTypingIndicator() {
+                document.getElementById('typingIndicator').style.display = 'block';
+                this.scrollToBottom();
+            }
+
+            hideTypingIndicator() {
+                document.getElementById('typingIndicator').style.display = 'none';
+            }
+
+            scrollToBottom() {
+                const conversationEl = document.getElementById('conversation');
+                conversationEl.scrollTop = conversationEl.scrollHeight;
+            }
+
+            clearConversation() {
+                this.conversation = [];
+                document.getElementById('conversation').innerHTML = '';
+                this.updateStatus('Conversation cleared. Ready to communicate!');
+            }
+
+            updateConnectionStatus(status) {
+                const statusEl = document.getElementById('connectionStatus');
+                statusEl.className = `connection-status status-${status}`;
+            }
+
+            updateStatus(message) {
+                document.getElementById('status').innerHTML = `
+                    <span class="connection-status status-${this.isConnected ? 'connected' : 'disconnected'}" id="connectionStatus"></span>
+                    ${message}
+                `;
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            window.voiceService = new VoiceService();
+        });
+    </script>
+</body>
+</html>
