@@ -9,7 +9,7 @@ public class AgentController {
   @Value("${rag.url:http://rag:8082}") String ragUrl;
 
   @GetMapping(value="/run-stream", produces=MediaType.TEXT_EVENT_STREAM_VALUE)
-  public SseEmitter run(@RequestParam String message){
+  public SseEmitter run(@RequestParam("message") String message){
     SseEmitter sse = new SseEmitter(0L);
     Executors.newSingleThreadExecutor().submit(() -> {
       try{
@@ -38,7 +38,78 @@ public class AgentController {
   }
   private String safeCalc(String expr){
     String cleaned = expr.replaceAll("[^0-9\\+\\-\\*/\\(\\)\\.\\s]","").trim();
-    try { javax.script.ScriptEngine e = new javax.script.ScriptEngineManager().getEngineByName("JavaScript"); return String.valueOf(e.eval(cleaned)); }
-    catch (Exception ex) { return "Calc error"; }
+    try { 
+      System.out.println("Original: " + expr);
+      System.out.println("Cleaned: " + cleaned);
+      return String.valueOf(evaluateExpression(cleaned)); 
+    }
+    catch (Exception ex) { 
+      return "Calc error: " + ex.getMessage(); 
+    }
+  }
+
+  private double evaluateExpression(String expr) {
+    // Simple expression evaluator for basic arithmetic
+    System.out.println("Parsing expression: " + expr);
+    expr = expr.replaceAll("\\s+", ""); // Remove all whitespace
+    System.out.println("After removing spaces: " + expr);
+    
+    // Simple approach: evaluate left to right with operator precedence
+    return evaluateLeftToRight(expr);
+  }
+  
+  private double evaluateLeftToRight(String expr) {
+    // Handle parentheses first
+    while (expr.contains("(")) {
+      int start = expr.lastIndexOf("(");
+      int end = expr.indexOf(")", start);
+      if (end == -1) throw new IllegalArgumentException("Mismatched parentheses");
+      
+      String subExpr = expr.substring(start + 1, end);
+      double result = evaluateLeftToRight(subExpr);
+      expr = expr.substring(0, start) + result + expr.substring(end + 1);
+    }
+    
+    // Split by addition/subtraction (lowest precedence)
+    String[] addSubParts = expr.split("(?<=[+-])|(?=[+-])");
+    if (addSubParts.length == 1) {
+      // No addition/subtraction, evaluate multiplication/division
+      return evaluateMultDiv(expr);
+    }
+    
+    double result = evaluateMultDiv(addSubParts[0]);
+    for (int i = 1; i < addSubParts.length; i += 2) {
+      if (i + 1 < addSubParts.length) {
+        double num = evaluateMultDiv(addSubParts[i + 1]);
+        if (addSubParts[i].equals("+")) {
+          result += num;
+        } else if (addSubParts[i].equals("-")) {
+          result -= num;
+        }
+      }
+    }
+    return result;
+  }
+  
+  private double evaluateMultDiv(String expr) {
+    // Split by multiplication/division
+    String[] multDivParts = expr.split("(?<=[*/])|(?=[*/])");
+    if (multDivParts.length == 1) {
+      return Double.parseDouble(expr);
+    }
+    
+    double result = Double.parseDouble(multDivParts[0]);
+    for (int i = 1; i < multDivParts.length; i += 2) {
+      if (i + 1 < multDivParts.length) {
+        double num = Double.parseDouble(multDivParts[i + 1]);
+        if (multDivParts[i].equals("*")) {
+          result *= num;
+        } else if (multDivParts[i].equals("/")) {
+          if (num == 0) throw new ArithmeticException("Division by zero");
+          result /= num;
+        }
+      }
+    }
+    return result;
   }
 }
