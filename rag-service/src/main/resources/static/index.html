@@ -1,9 +1,308 @@
-<!doctype html><title>RAG</title>
-<button id=ing>Ingest</button> <input id=q placeholder="ask..." style="width:60%"><button id=ask>Search</button><button id=askS>SSE</button>
-<pre id=out></pre>
-<script>
-const out=document.getElementById('out');
-ing.onclick=async()=>{out.textContent="ingesting..."; const r=await fetch('/ingest',{method:'POST'}); out.textContent=JSON.stringify(await r.json(),null,2);}
-ask.onclick=async()=>{out.textContent="searching..."; const r=await fetch('/query?q='+encodeURIComponent(q.value)); out.textContent=JSON.stringify(await r.json(),null,2)}
-askS.onclick=()=>{out.textContent=""; const es=new EventSource('/query-stream?q='+encodeURIComponent(q.value)); es.addEventListener('hit',e=>out.textContent+=e.data+"\n"); es.addEventListener('done',()=>es.close());}
-</script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Service - Document Search</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: #667eea;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .search-section {
+            padding: 30px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .results {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 300px;
+        }
+
+        .result-item {
+            background: white;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .result-doc {
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .result-score {
+            color: #667eea;
+            font-weight: 500;
+        }
+
+        .result-content {
+            color: #495057;
+            line-height: 1.5;
+        }
+
+        .status {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .success {
+            color: #28a745;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>RAG Service</h1>
+            <p>Retrieval-Augmented Generation for Document Search</p>
+        </div>
+
+        <div class="controls">
+            <div class="button-group">
+                <button class="btn" id="ingestBtn">📥 Ingest Documents</button>
+                <button class="btn" id="clearBtn">🗑️ Clear Results</button>
+            </div>
+        </div>
+
+        <div class="search-section">
+            <input 
+                type="text" 
+                class="search-input" 
+                id="searchInput" 
+                placeholder="Enter your search query... (e.g., 'artificial intelligence', 'machine learning')"
+            >
+            
+            <div id="status" class="status">Ready to search. Click "Ingest Documents" first to index the corpus.</div>
+            
+            <div id="results" class="results" style="display: none;">
+                <h3>Search Results</h3>
+                <div id="resultsList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class RAGService {
+            constructor() {
+                this.initializeEventListeners();
+            }
+
+            initializeEventListeners() {
+                document.getElementById('ingestBtn').addEventListener('click', () => this.ingestDocuments());
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearResults());
+                document.getElementById('searchInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.search();
+                    }
+                });
+            }
+
+            async ingestDocuments() {
+                const btn = document.getElementById('ingestBtn');
+                const status = document.getElementById('status');
+                
+                btn.disabled = true;
+                btn.innerHTML = '<span class="loading"></span> Ingesting...';
+                status.innerHTML = 'Ingesting documents from corpus...';
+
+                try {
+                    const response = await fetch('/ingest', { method: 'POST' });
+                    const data = await response.json();
+                    
+                    if (data.ok) {
+                        status.innerHTML = `<div class="success">✅ Successfully ingested ${data.docs} documents with ${data.chunks} chunks</div>`;
+                        document.getElementById('results').style.display = 'block';
+                    } else {
+                        throw new Error('Ingest failed');
+                    }
+                } catch (error) {
+                    status.innerHTML = `<div class="error">❌ Failed to ingest documents: ${error.message}</div>`;
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = '📥 Ingest Documents';
+                }
+            }
+
+            async search() {
+                const query = document.getElementById('searchInput').value.trim();
+                if (!query) {
+                    document.getElementById('status').innerHTML = '<div class="error">Please enter a search query</div>';
+                    return;
+                }
+
+                const status = document.getElementById('status');
+                status.innerHTML = '<span class="loading"></span> Searching...';
+
+                try {
+                    const response = await fetch(`/query?q=${encodeURIComponent(query)}&k=5`);
+                    const data = await response.json();
+                    
+                    if (data.results && data.results.length > 0) {
+                        this.displayResults(data.results);
+                        status.innerHTML = `Found ${data.results.length} results for "${query}"`;
+                    } else {
+                        status.innerHTML = `No results found for "${query}"`;
+                        document.getElementById('resultsList').innerHTML = '<p>No matching documents found.</p>';
+                    }
+                } catch (error) {
+                    status.innerHTML = `<div class="error">❌ Search failed: ${error.message}</div>`;
+                }
+            }
+
+            displayResults(results) {
+                const resultsList = document.getElementById('resultsList');
+                resultsList.innerHTML = '';
+
+                results.forEach(result => {
+                    const resultItem = document.createElement('div');
+                    resultItem.className = 'result-item';
+                    resultItem.innerHTML = `
+                        <div class="result-header">
+                            <span class="result-doc">${result.doc} (Chunk ${result.chunk_id})</span>
+                            <span class="result-score">Score: ${result.score.toFixed(3)}</span>
+                        </div>
+                        <div class="result-content">
+                            Document chunk ${result.chunk_id} from ${result.doc}
+                        </div>
+                    `;
+                    resultsList.appendChild(resultItem);
+                });
+            }
+
+            clearResults() {
+                document.getElementById('searchInput').value = '';
+                document.getElementById('results').style.display = 'none';
+                document.getElementById('status').innerHTML = 'Ready to search. Click "Ingest Documents" first to index the corpus.';
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            window.ragService = new RAGService();
+        });
+    </script>
+</body>
+</html>
