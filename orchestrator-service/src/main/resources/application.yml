@@ -14,3 +14,6 @@ logging:
 security:
   apiKeyHeader: X-API-Key
   apiKey: ""   # set to enforce API key
+ollama:
+  url: http://ollama:11434
+  model: llama3.1
