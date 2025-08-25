@@ -1,9 +1,461 @@
-<!doctype html><title>Agent</title>
-<input id=q style="width:60%" placeholder="2+2, http://example.com, or general question"><button id=go>Run SSE</button>
-<pre id=out></pre>
-<script>
-const out=document.getElementById('out');
-go.onclick=()=>{ out.textContent=""; const es=new EventSource('/run-stream?message='+encodeURIComponent(q.value)); 
-['plan','action','observation','final'].forEach(n=>es.addEventListener(n,e=>out.textContent+=n.toUpperCase()+": "+e.data+"\n"));
-es.addEventListener('done',()=>es.close()); };
-</script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent Service - Tool-Based Reasoning</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .message-input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .message-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .send-btn {
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            background: #667eea;
+            color: white;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .send-btn:hover {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+
+        .send-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .examples {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .example-btn {
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 16px;
+            border: 1px solid #667eea;
+            border-radius: 20px;
+            background: white;
+            color: #667eea;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .example-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .conversation {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            position: relative;
+        }
+
+        .message.user {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            margin-left: 20%;
+        }
+
+        .message.agent {
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+            margin-right: 20%;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .message-type {
+            color: #666;
+        }
+
+        .message-time {
+            color: #999;
+            font-size: 12px;
+        }
+
+        .message-content {
+            line-height: 1.5;
+            color: #333;
+        }
+
+        .thinking {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            font-style: italic;
+            color: #e65100;
+        }
+
+        .tool-call {
+            background: #e8f5e8;
+            border-left: 4px solid #4caf50;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+        }
+
+        .tool-name {
+            font-weight: 600;
+            color: #2e7d32;
+            margin-bottom: 5px;
+        }
+
+        .tool-input {
+            color: #1b5e20;
+            font-family: monospace;
+        }
+
+        .observation {
+            background: #fce4ec;
+            border-left: 4px solid #e91e63;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+        }
+
+        .status {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .clear-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            background: #6c757d;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .clear-btn:hover {
+            background: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Agent Service</h1>
+            <p>Tool-Based Reasoning with RAG Integration</p>
+        </div>
+
+        <div class="controls">
+            <div class="input-group">
+                <input 
+                    type="text" 
+                    class="message-input" 
+                    id="messageInput" 
+                    placeholder="Ask me anything! I can calculate, fetch web pages, or search documents..."
+                    value="Calculate 15 * 23 + 7"
+                >
+                <button class="send-btn" id="sendBtn">🚀 Send</button>
+            </div>
+            
+            <div class="examples">
+                <div class="example-btn" data-example="Calculate 15 * 23 + 7">🧮 Math</div>
+                <div class="example-btn" data-example="https://httpbin.org/json">🌐 Web Fetch</div>
+                <div class="example-btn" data-example="artificial intelligence">📚 Document Search</div>
+                <div class="example-btn" data-example="What is 2 to the power of 8?">💡 Power</div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <button class="clear-btn" id="clearBtn">🗑️ Clear</button>
+            
+            <div id="status" class="status">Ready to help! Try asking me to calculate something, fetch a webpage, or search documents.</div>
+            
+            <div id="conversation" class="conversation"></div>
+        </div>
+    </div>
+
+    <script>
+        class AgentService {
+            constructor() {
+                this.conversation = [];
+                this.initializeEventListeners();
+            }
+
+            initializeEventListeners() {
+                document.getElementById('sendBtn').addEventListener('click', () => this.sendMessage());
+                document.getElementById('messageInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.sendMessage();
+                    }
+                });
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearConversation());
+
+                // Example buttons
+                document.querySelectorAll('.example-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        document.getElementById('messageInput').value = e.target.dataset.example;
+                        this.sendMessage();
+                    });
+                });
+            }
+
+            async sendMessage() {
+                const message = document.getElementById('messageInput').value.trim();
+                if (!message) return;
+
+                // Add user message
+                this.addMessage('user', message, 'User Input');
+                
+                // Clear input and disable send button
+                document.getElementById('messageInput').value = '';
+                const sendBtn = document.getElementById('sendBtn');
+                sendBtn.disabled = true;
+                sendBtn.innerHTML = '<span class="loading"></span> Processing...';
+
+                try {
+                    // Start streaming response
+                    await this.streamResponse(message);
+                } catch (error) {
+                    this.addMessage('agent', `Error: ${error.message}`, 'Error');
+                } finally {
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = '🚀 Send';
+                }
+            }
+
+            async streamResponse(prompt) {
+                const eventSource = new EventSource(`/run-stream?message=${encodeURIComponent(prompt)}`);
+                
+                let responseContent = '';
+                let currentStep = '';
+
+                eventSource.addEventListener('plan', (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        currentStep = `Planning: Using tool ${data.tool}`;
+                        this.addThinkingStep(currentStep);
+                    } catch (error) {
+                        currentStep = 'Planning...';
+                        this.addThinkingStep(currentStep);
+                    }
+                });
+
+                eventSource.addEventListener('action', (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        this.addToolCall(data.tool, data.input);
+                    } catch (error) {
+                        this.addToolCall('unknown', 'Processing...');
+                    }
+                });
+
+                eventSource.addEventListener('observation', (e) => {
+                    this.addObservation(e.data);
+                });
+
+                eventSource.addEventListener('final', (e) => {
+                    responseContent = e.data;
+                });
+
+                eventSource.addEventListener('done', () => {
+                    // Add final response
+                    this.addMessage('agent', responseContent, 'Final Response');
+                    eventSource.close();
+                });
+
+                eventSource.addEventListener('error', (e) => {
+                    this.addMessage('agent', `Streaming error: ${e.message}`, 'Error');
+                    eventSource.close();
+                });
+            }
+
+            addMessage(type, content, messageType) {
+                const message = {
+                    type,
+                    content,
+                    messageType,
+                    timestamp: new Date().toLocaleTimeString()
+                };
+
+                this.conversation.push(message);
+                this.displayMessage(message);
+            }
+
+            addThinkingStep(content) {
+                const thinkingDiv = document.createElement('div');
+                thinkingDiv.className = 'thinking';
+                thinkingDiv.innerHTML = `💭 ${content}`;
+                document.getElementById('conversation').appendChild(thinkingDiv);
+                this.scrollToBottom();
+            }
+
+            addToolCall(tool, input) {
+                const toolDiv = document.createElement('div');
+                toolDiv.className = 'tool-call';
+                toolDiv.innerHTML = `
+                    <div class="tool-name">🔧 Tool: ${tool}</div>
+                    <div class="tool-input">Input: ${input}</div>
+                `;
+                document.getElementById('conversation').appendChild(toolDiv);
+                this.scrollToBottom();
+            }
+
+            addObservation(content) {
+                const obsDiv = document.createElement('div');
+                obsDiv.className = 'observation';
+                obsDiv.innerHTML = `📊 Observation: ${content}`;
+                document.getElementById('conversation').appendChild(obsDiv);
+                this.scrollToBottom();
+            }
+
+            displayMessage(message) {
+                const conversationEl = document.getElementById('conversation');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${message.type}`;
+                messageDiv.innerHTML = `
+                    <div class="message-header">
+                        <span class="message-type">${message.messageType}</span>
+                        <span class="message-time">${message.timestamp}</span>
+                    </div>
+                    <div class="message-content">${message.content}</div>
+                `;
+                conversationEl.appendChild(messageDiv);
+                this.scrollToBottom();
+            }
+
+            scrollToBottom() {
+                const conversationEl = document.getElementById('conversation');
+                conversationEl.scrollTop = conversationEl.scrollHeight;
+            }
+
+            clearConversation() {
+                this.conversation = [];
+                document.getElementById('conversation').innerHTML = '';
+                document.getElementById('status').innerHTML = 'Conversation cleared. Ready to help!';
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            window.agentService = new AgentService();
+        });
+    </script>
+</body>
+</html>
