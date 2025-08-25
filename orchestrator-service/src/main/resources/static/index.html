@@ -1,44 +1,672 @@
-<!doctype html><meta charset="utf-8"><title>Modes Gallery</title>
-<style>body{font-family:sans-serif;margin:24px;max-width:900px}pre{background:#111;color:#eee;padding:12px;border-radius:8px;white-space:pre-wrap}</style>
-<h1>Modes Gallery</h1>
-<input id=prompt style="width:100%;padding:8px" placeholder="Type a prompt..."><br><br>
-<button id=rest>REST</button>
-<button id=sse>SSE</button>
-<button id=ws>WebSocket</button>
-<button id=batch>Batch + SSE</button>
-<button id=long>Long-poll</button>
-<pre id=out></pre>
-<script>
-const out = document.getElementById('out');
-const val = () => document.getElementById('prompt').value || "hello modes";
-rest.onclick = async () => {
-  out.textContent = "REST...\n";
-  const r = await fetch('/api/v1/rest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:val()})});
-  out.textContent += JSON.stringify(await r.json(), null, 2);
-};
-sse.onclick = () => {
-  out.textContent = "SSE...\n";
-  const es = new EventSource('/api/v1/sse?prompt='+encodeURIComponent(val()));
-  es.addEventListener('token', e => out.textContent += e.data);
-  es.addEventListener('done',  () => { out.textContent += "\n[DONE]"; es.close(); });
-};
-ws.onclick = () => {
-  out.textContent = "WS...\n";
-  const s = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/api/v1/ws');
-  s.onopen = () => s.send(JSON.stringify({type:'user_prompt', prompt: val()}));
-  s.onmessage = e => out.textContent += e.data + "\n";
-};
-batch.onclick = async () => {
-  out.textContent = "Batch...\n";
-  const r = await fetch('/api/v1/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:val()})});
-  const j = await r.json(); out.textContent += "jobId="+j.jobId+"\n";
-  const es = new EventSource('/api/v1/jobs/'+j.jobId+'/events');
-  es.addEventListener('status', e => out.textContent += "status: "+e.data+"\n");
-  es.addEventListener('done',   () => { out.textContent += "[DONE]\n"; es.close(); });
-};
-long.onclick = async () => {
-  out.textContent = "Long-poll...\n";
-  const r = await fetch('/api/v1/longpoll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:val()})});
-  out.textContent += JSON.stringify(await r.json(), null, 2);
-};
-</script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Communication Modes Gallery</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .controls {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .prompt-input {
+            flex: 1;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .prompt-input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .transport-selector {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .transport-btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: white;
+            color: #495057;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+            border: 2px solid #e9ecef;
+        }
+
+        .transport-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+
+        .transport-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .transport-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            padding: 30px;
+        }
+
+        .response-panel {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 400px;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .panel-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .metrics {
+            display: flex;
+            gap: 15px;
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        .metric {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .response-content {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            min-height: 300px;
+            overflow-y: auto;
+        }
+
+        .comparison-panel {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .comparison-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .comparison-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+            text-align: center;
+        }
+
+        .comparison-label {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 8px;
+        }
+
+        .comparison-value {
+            font-size: 1.5rem;
+            color: #667eea;
+            font-weight: 700;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-queued { background: #ffc107; }
+        .status-processing { background: #17a2b8; }
+        .status-done { background: #28a745; }
+        .status-error { background: #dc3545; }
+
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .input-group {
+                flex-direction: column;
+            }
+            
+            .transport-selector {
+                justify-content: stretch;
+            }
+            
+            .transport-btn {
+                flex: 1;
+            }
+        }
+
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+
+        .success {
+            color: #155724;
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>LLM Communication Modes Gallery</h1>
+            <p>Explore different ways to communicate with Large Language Models</p>
+        </div>
+
+        <div class="controls">
+            <div class="input-group">
+                <input 
+                    type="text" 
+                    id="prompt" 
+                    class="prompt-input" 
+                    placeholder="Enter your prompt here... (e.g., 'Write a haiku about technology')"
+                    value="Write a haiku about artificial intelligence"
+                >
+            </div>
+            
+            <div class="transport-selector">
+                <button class="transport-btn active" data-mode="rest">
+                    🔄 REST (Sync)
+                </button>
+                <button class="transport-btn" data-mode="sse">
+                    📡 SSE (Streaming)
+                </button>
+                <button class="transport-btn" data-mode="ws">
+                    🔌 WebSocket (Real-time)
+                </button>
+                <button class="transport-btn" data-mode="batch">
+                    📦 Batch + Webhook
+                </button>
+                <button class="transport-btn" data-mode="long">
+                    ⏳ Long-polling
+                </button>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="response-panel">
+                <div class="panel-header">
+                    <div class="panel-title">Response</div>
+                    <div class="metrics">
+                        <div class="metric">
+                            <span class="metric-label">TTFB</span>
+                            <span class="metric-value" id="ttfb">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Total</span>
+                            <span class="metric-value" id="total">-</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Status</span>
+                            <span class="metric-value" id="status">Ready</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="response-content" id="response"></div>
+            </div>
+
+            <div class="comparison-panel">
+                <div class="comparison-title">Performance Comparison</div>
+                <div class="comparison-grid">
+                    <div class="comparison-item">
+                        <div class="comparison-label">Current Mode</div>
+                        <div class="comparison-value" id="current-mode">REST</div>
+                    </div>
+                    <div class="comparison-item">
+                        <div class="comparison-label">Response Time</div>
+                        <div class="comparison-value" id="response-time">-</div>
+                    </div>
+                    <div class="comparison-item">
+                        <div class="comparison-label">Tokens/sec</div>
+                        <div class="comparison-value" id="tokens-per-sec">-</div>
+                    </div>
+                    <div class="comparison-item">
+                        <div class="comparison-label">User Experience</div>
+                        <div class="comparison-value" id="ux-score">-</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class LLMCommunicationLab {
+            constructor() {
+                this.currentMode = 'rest';
+                this.startTime = 0;
+                this.firstTokenTime = 0;
+                this.tokenCount = 0;
+                this.currentEventSource = null;
+                this.currentWebSocket = null;
+                
+                this.initializeEventListeners();
+                this.updateUI();
+            }
+
+            initializeEventListeners() {
+                // Transport mode selection
+                document.querySelectorAll('.transport-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        this.switchMode(e.target.dataset.mode);
+                    });
+                });
+
+                // Enter key in prompt input
+                document.getElementById('prompt').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        this.executeCurrentMode();
+                    }
+                });
+            }
+
+            switchMode(mode) {
+                // Update active button
+                document.querySelectorAll('.transport-btn').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.mode === mode);
+                });
+
+                this.currentMode = mode;
+                document.getElementById('current-mode').textContent = this.getModeDisplayName(mode);
+                
+                // Clear previous response
+                this.clearResponse();
+                this.resetMetrics();
+                
+                // Update status
+                this.updateStatus('Ready');
+                
+                console.log(`Switched to ${mode} mode`);
+            }
+
+            getModeDisplayName(mode) {
+                const names = {
+                    'rest': 'REST',
+                    'sse': 'SSE',
+                    'ws': 'WebSocket',
+                    'batch': 'Batch',
+                    'long': 'Long-poll'
+                };
+                return names[mode] || mode;
+            }
+
+            executeCurrentMode() {
+                const prompt = document.getElementById('prompt').value.trim();
+                if (!prompt) {
+                    this.showError('Please enter a prompt');
+                    return;
+                }
+
+                this.startTime = Date.now();
+                this.tokenCount = 0;
+                this.clearResponse();
+                this.updateStatus('Processing...');
+
+                switch (this.currentMode) {
+                    case 'rest':
+                        this.executeREST(prompt);
+                        break;
+                    case 'sse':
+                        this.executeSSE(prompt);
+                        break;
+                    case 'ws':
+                        this.executeWebSocket(prompt);
+                        break;
+                    case 'batch':
+                        this.executeBatch(prompt);
+                        break;
+                    case 'long':
+                        this.executeLongPoll(prompt);
+                        break;
+                }
+            }
+
+            async executeREST(prompt) {
+                try {
+                    const response = await fetch('/api/v1/rest', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt, shape: 'text' })
+                    });
+
+                    const data = await response.json();
+                    const totalTime = Date.now() - this.startTime;
+                    
+                    this.updateResponse(JSON.stringify(data, null, 2));
+                    this.updateMetrics(0, totalTime);
+                    this.updateStatus('Completed');
+                    this.calculateUXScore(totalTime, 0);
+                } catch (error) {
+                    this.showError(`REST request failed: ${error.message}`);
+                }
+            }
+
+            executeSSE(prompt) {
+                this.currentEventSource = new EventSource(`/api/v1/sse?prompt=${encodeURIComponent(prompt)}`);
+                
+                this.currentEventSource.addEventListener('meta', (e) => {
+                    try {
+                        const meta = JSON.parse(e.data);
+                        this.updateResponse(`Request ID: ${meta.requestId}\nProvider: ${meta.provider}\nModel: ${meta.model}\n\n`);
+                    } catch (error) {
+                        this.updateResponse('Meta received...\n\n');
+                    }
+                });
+
+                this.currentEventSource.addEventListener('token', (e) => {
+                    if (this.tokenCount === 0) {
+                        this.firstTokenTime = Date.now();
+                        this.updateMetrics(Date.now() - this.startTime, 0);
+                    }
+                    this.tokenCount++;
+                    this.updateResponse(e.data);
+                });
+
+                this.currentEventSource.addEventListener('done', () => {
+                    const totalTime = Date.now() - this.startTime;
+                    this.updateResponse('\n\n[DONE]');
+                    this.updateMetrics(this.firstTokenTime - this.startTime, totalTime);
+                    this.updateStatus('Completed');
+                    this.calculateUXScore(totalTime, this.firstTokenTime - this.startTime);
+                    this.currentEventSource.close();
+                });
+
+                this.currentEventSource.addEventListener('error', (e) => {
+                    this.showError(`SSE error: ${e.message}`);
+                    this.currentEventSource.close();
+                });
+            }
+
+            executeWebSocket(prompt) {
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                this.currentWebSocket = new WebSocket(`${protocol}//${location.host}/api/v1/ws`);
+                
+                this.currentWebSocket.onopen = () => {
+                    this.currentWebSocket.send(JSON.stringify({
+                        type: 'user_prompt',
+                        prompt: prompt
+                    }));
+                };
+
+                this.currentWebSocket.onmessage = (e) => {
+                    try {
+                        const data = JSON.parse(e.data);
+                        if (data.type === 'plan') {
+                            this.updateResponse(`Planning: Using tool ${data.data.tool}\n\n`);
+                        } else if (data.type === 'token') {
+                            if (this.tokenCount === 0) {
+                                this.firstTokenTime = Date.now();
+                                this.updateMetrics(Date.now() - this.startTime, 0);
+                            }
+                            this.tokenCount++;
+                            this.updateResponse(data.data);
+                        } else if (data.type === 'final') {
+                            this.updateResponse(`\n\nFinal: ${data.data}`);
+                        } else if (data.type === 'done') {
+                            const totalTime = Date.now() - this.startTime;
+                            this.updateResponse('\n\n[DONE]');
+                            this.updateMetrics(this.firstTokenTime - this.startTime, totalTime);
+                            this.updateStatus('Completed');
+                            this.calculateUXScore(totalTime, this.firstTokenTime - this.startTime);
+                        }
+                    } catch (error) {
+                        this.updateResponse(e.data + '\n');
+                    }
+                };
+
+                this.currentWebSocket.onerror = (error) => {
+                    this.showError(`WebSocket error: ${error.message}`);
+                };
+            }
+
+            async executeBatch(prompt) {
+                try {
+                    // Submit batch job
+                    const response = await fetch('/api/v1/batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt })
+                    });
+
+                    const data = await response.json();
+                    this.updateResponse(`Job submitted: ${data.jobId}\n\n`);
+                    
+                    // Monitor job progress
+                    const eventSource = new EventSource(`/api/v1/jobs/${data.jobId}/events`);
+                    
+                    eventSource.addEventListener('status', (e) => {
+                        this.updateResponse(`Status: ${e.data}\n`);
+                    });
+
+                    eventSource.addEventListener('done', () => {
+                        const totalTime = Date.now() - this.startTime;
+                        this.updateResponse('[DONE]\n');
+                        this.updateMetrics(0, totalTime);
+                        this.updateStatus('Completed');
+                        this.calculateUXScore(totalTime, 0);
+                        eventSource.close();
+                    });
+
+                    eventSource.addEventListener('error', (e) => {
+                        this.showError(`Batch monitoring error: ${e.message}`);
+                        eventSource.close();
+                    });
+
+                } catch (error) {
+                    this.showError(`Batch submission failed: ${error.message}`);
+                }
+            }
+
+            async executeLongPoll(prompt) {
+                try {
+                    const response = await fetch('/api/v1/longpoll', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ prompt, shape: 'text' })
+                    });
+
+                    const data = await response.json();
+                    const totalTime = Date.now() - this.startTime;
+                    
+                    this.updateResponse(JSON.stringify(data, null, 2));
+                    this.updateMetrics(0, totalTime);
+                    this.updateStatus('Completed');
+                    this.calculateUXScore(totalTime, 0);
+                } catch (error) {
+                    this.showError(`Long-poll request failed: ${error.message}`);
+                }
+            }
+
+            updateResponse(content) {
+                const responseEl = document.getElementById('response');
+                responseEl.textContent += content;
+                responseEl.scrollTop = responseEl.scrollHeight;
+            }
+
+            clearResponse() {
+                document.getElementById('response').textContent = '';
+            }
+
+            updateMetrics(ttfb, total) {
+                if (ttfb > 0) {
+                    document.getElementById('ttfb').textContent = `${ttfb}ms`;
+                }
+                if (total > 0) {
+                    document.getElementById('total').textContent = `${total}ms`;
+                }
+            }
+
+            resetMetrics() {
+                document.getElementById('ttfb').textContent = '-';
+                document.getElementById('total').textContent = '-';
+                document.getElementById('tokens-per-sec').textContent = '-';
+                document.getElementById('ux-score').textContent = '-';
+            }
+
+            updateStatus(status) {
+                document.getElementById('status').textContent = status;
+            }
+
+            calculateUXScore(totalTime, ttfb) {
+                // Calculate tokens per second if we have token count
+                if (this.tokenCount > 0 && totalTime > 0) {
+                    const tokensPerSec = (this.tokenCount / (totalTime / 1000)).toFixed(1);
+                    document.getElementById('tokens-per-sec').textContent = tokensPerSec;
+                }
+
+                // Simple UX score based on response time
+                let uxScore = 'A';
+                if (totalTime > 5000) uxScore = 'D';
+                else if (totalTime > 3000) uxScore = 'C';
+                else if (totalTime > 1000) uxScore = 'B';
+                
+                document.getElementById('ux-score').textContent = uxScore;
+            }
+
+            showError(message) {
+                this.updateResponse(`\n\n❌ Error: ${message}`);
+                this.updateStatus('Error');
+            }
+
+            updateUI() {
+                // Initial UI setup
+                document.getElementById('current-mode').textContent = this.getModeDisplayName(this.currentMode);
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', () => {
+            window.llmLab = new LLMCommunicationLab();
+        });
+    </script>
+</body>
+</html>
