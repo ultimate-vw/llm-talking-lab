@@ -27,9 +27,12 @@ public class SseApi {
           sse.completeWithError(err);
         }, () -> {
           try{ sse.send(SseEmitter.event().name("done").data("[DONE]")); }catch(IOException ignored){}
+          sse.complete();
         });
-      }catch(Exception e){ try{ sse.send(SseEmitter.event().name("error").data(e.getMessage())); }catch(IOException ignored){} sse.completeWithError(e); }
-      finally{ sse.complete(); }
+      }catch(Exception e){ 
+        try{ sse.send(SseEmitter.event().name("error").data(e.getMessage())); }catch(IOException ignored){}
+        sse.completeWithError(e); 
+      }
     });
     return sse;
   }
