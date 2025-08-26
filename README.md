@@ -74,10 +74,43 @@ curl -s http://localhost/api/v1/rest \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Write a haiku about oceans"}'
 ```
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as UI/Client
+  participant GW as API Gateway / Traefik
+  participant OR as Orchestrator
+  participant LLM as LLM Runtime
 
+  U->>GW: POST /api/v1/rest {prompt}
+  GW->>OR: Route request
+  OR->>LLM: Generate(prompt)
+  LLM-->>OR: {answer}
+  OR-->>GW: JSON {answer}
+  GW-->>U: 200 OK
+
+```
 #### **SSE (Streaming)**
 ```bash
 curl -N "http://localhost/api/v1/sse?prompt=Count%20to%20five"
+```
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as UI/Client
+  participant GW as API Gateway
+  participant OR as Orchestrator
+  participant LLM as LLM Runtime
+
+  U->>GW: GET /api/v1/sse?prompt=... (Accept: text/event-stream)
+  GW->>OR: Open stream
+  OR->>LLM: Start generation
+  loop Stream tokens until done
+    LLM-->>OR: token
+    OR-->>U: event: token / data:"..."
+  end
+  OR-->>U: event: done
+
 ```
 
 #### **WebSocket**
@@ -85,6 +118,27 @@ curl -N "http://localhost/api/v1/sse?prompt=Count%20to%20five"
 # Use the web interface or test with wscat
 wscat -c ws://localhost/api/v1/ws
 # Send: {"type":"user_prompt","prompt":"hello"}
+```
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as UI
+  participant OR as Orchestrator (WebSocket)
+  participant TK as Tools / RAG / DB
+  participant LLM as LLM
+
+  U->>OR: WS connect
+  U->>OR: {"type":"user","prompt":"..."}
+  par Plan + Stream
+    OR->>LLM: generate(stream=true)
+    OR-->>U: {"type":"delta","text":"..."}
+  and Tool sidecar
+    OR->>TK: tool.call(params)
+    TK-->>OR: result
+  end
+  OR-->>U: {"type":"final","text":"..."}
+  U-->>OR: WS close
+
 ```
 
 #### **Batch Processing**
@@ -97,12 +151,54 @@ curl -s http://localhost/api/v1/batch \
 # Monitor job (replace JOB_ID with actual ID)
 curl -N "http://localhost/api/v1/jobs/JOB_ID/events"
 ```
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant O as Orchestrator
+  participant Q as Queue
+  participant W as Worker
+  participant L as LLM/Tools
+  participant B as Blob/Results
+
+  C->>O: POST /api/v1/batch (prompt, callbackUrl)
+  O->>Q: Enqueue job
+  Q->>W: Dispatch job
+  W->>L: Run generation
+  L-->>W: Result
+  W->>B: Write /data/out/jobId.json
+  O-->>C: Return jobId
+  O-->>C: SSE progress (optional)
+  W-->>C: POST callbackUrl (jobId, status, outputUrl)
+
+```
 
 #### **Long-polling**
 ```bash
 curl -s http://localhost/api/v1/longpoll \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"test message"}'
+```
+```mermaid
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant O as Orchestrator
+  participant W as Worker
+  participant L as LLM
+
+  C->>O: POST /api/v1/longpoll (prompt)
+  O->>W: Start job
+  W->>L: Run generation
+  L-->>W: Result
+  O->>O: Check if ready
+  alt Result ready
+    O-->>C: 200 OK (final)
+  else Pending
+    O-->>C: 202 Accepted (pending, jobId)
+    C->>O: GET /api/v1/longpoll?jobId
+  end
+
 ```
 
 ### **Specialized Services**
@@ -158,6 +254,69 @@ curl -f http://localhost/rag/ || echo "RAG service down"
 curl -f http://localhost/agent/ || echo "Agent service down"
 curl -f http://localhost/docs/ || echo "Docs service down"
 curl -f http://localhost/voice/ || echo "Voice service down"
+```
+
+```mermaid
+flowchart TB
+  subgraph NET[Internet]
+  end
+
+  NET --> GW[Traefik / API Gateway<br/>TLS • Routing]
+
+  subgraph T[Transports]
+    REST[REST]
+    SSE[SSE]
+    WS[WebSocket]
+    BATCH[Batch]
+    LP[Long-poll]
+  end
+
+  GW --> REST
+  GW --> SSE
+  GW --> WS
+  GW --> BATCH
+  GW --> LP
+
+  subgraph CORE[Orchestrator Core]
+    OR[Plan • Route • Schema I/O<br/>QoS • Observability]
+  end
+
+  REST --> OR
+  SSE  --> OR
+  WS   --> OR
+  BATCH--> OR
+  LP   --> OR
+
+  subgraph SVC[Specialized Services]
+    RAG[RAG<br/>Ingest • Index • Search]
+    AG[Agent<br/>Planner • Tools]
+    DOCS[Docs<br/>ETL → JSON • Jobs]
+    VOICE[Voice<br/>ASR • TTS • WS]
+  end
+
+  OR --> RAG
+  OR --> AG
+  OR --> DOCS
+  OR --> VOICE
+
+  subgraph DATA[Data & Infra]
+    VDB[(Vector DB<br/>LanceDB/FAISS)]
+    PG[(Postgres<br/>Auth/Audit/Metrics)]
+    BLOB[(Blob/S3<br/>Results/Uploads)]
+    OBS[(Prom/Grafana<br/>OTel/Jaeger)]
+  end
+
+  RAG --> VDB
+  RAG --> PG
+  DOCS --> BLOB
+  OR --> OBS
+
+  AG --> TOOLS[External Tools<br/>HTTP • Shell • Calendars]
+  VOICE --> AUDIO[Audio I/O<br/>Devices/RTC]
+
+  LLM[(LLM Runtime<br/>Ollama local / Cloud API)]
+  OR --> LLM
+
 ```
 
 ##  **UI Features**
